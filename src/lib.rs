@@ -110,8 +110,12 @@ impl Pool {
     /// # Panics
     ///
     /// If `n` is zero.
-    pub fn new(n: usize) -> Self {
-        Self::with_config(n, ThreadConfig::new())
+    pub fn new(n: usize,cores:Vec<usize>) -> Self {
+        Self::with_config(n, ThreadConfig{
+            prefix: None,
+            stack_size: None,
+            cores: Some(Arc::new(cores))
+        })
     }
 
     /// Create a new `Pool` that will execute it's tasks on `n` worker threads and spawn them using
