@@ -28,14 +28,72 @@
 #![deny(rust_2018_idioms, missing_docs, broken_intra_doc_links)]
 
 mod wait;
+use hwloc2::{Topology, TopologyFlag, ObjectType, TopologyObject, CpuBindFlags};
 use wait::{Sentinel, WaitGroup};
 
 mod scope;
 pub use scope::Scope;
 
 use flume::{Receiver, Sender};
-use std::{sync::Arc, thread};
+use std::{sync::{Arc, Mutex}, thread};
+use lazy_static::lazy_static;
+use anyhow::{Result, format_err};
 
+lazy_static! {
+    static ref TOPOLOGY: Mutex<Topology> =
+        Mutex::new(Topology::with_flags(vec![TopologyFlag::IncludeDisallowed]).unwrap());
+}
+
+#[cfg(not(target_os = "windows"))]
+type ThreadId = libc::pthread_t;
+
+#[cfg(target_os = "windows")]
+pub type ThreadId = winapi::winnt::HANDLE;
+
+/// Helper method to get the thread id through libc, with current rust stable (1.5.0) its not
+/// possible otherwise I think.
+#[cfg(not(target_os = "windows"))]
+fn get_thread_id() -> ThreadId {
+    unsafe { libc::pthread_self() }
+}
+
+#[cfg(target_os = "windows")]
+fn get_thread_id() -> ThreadId {
+    unsafe { kernel32::GetCurrentThread() }
+}
+
+fn get_core_by_index(topo: &Topology, index: usize) -> Result<&TopologyObject> {
+    let idx = index;
+
+    match topo.objects_with_type(&ObjectType::PU) {
+        Ok(all_pus) if idx < all_pus.len() => Ok(all_pus[idx]),
+        _e => Err(format_err!("failed to get pu by index {}", idx,)),
+    }
+}
+
+fn bind_core(core_idx:usize){
+    let child_topo = &TOPOLOGY;
+    let tid = get_thread_id();
+    let mut locked_topo = child_topo.lock().expect("poisoned lock");
+    let pu = get_core_by_index(&locked_topo, core_idx)
+        .map_err(|err| format_err!("failed to get core at index {}: {:?}", core_idx, err)).unwrap();
+
+    let cpuset = pu
+        .complete_cpuset()
+        .ok_or_else(|| format_err!("no allowed cpuset for core at index {}", core_idx)).unwrap();
+    println!("coreIdx: {:?} allowed cpuset: {:?}", core_idx, cpuset);
+    let bind_to = cpuset;
+
+    println!("CoreIndex {:?} binding to {:?}", core_idx, bind_to);
+    // Set the binding.
+    let result = locked_topo
+        .set_cpubind_for_thread(tid, bind_to, CpuBindFlags::CPUBIND_THREAD)
+        .map_err(|err| format_err!("failed to bind CPU: {:?}", err));
+
+    if result.is_err() {
+        println!("error in bind_core, {:?}", result);
+    }
+}
 /// A structure providing access to a pool of worker threads and a way to spawn jobs.
 ///
 /// It spawns `n` threads at creation and then can be used to spawn scoped threads via
@@ -82,9 +140,19 @@ impl Pool {
                 builder = builder.stack_size(stack_size);
             }
 
+            let mut cores:Arc<Vec<usize>> = Arc::new(Vec::new());
+            if let Some(core) = pool.inner.config.cores.clone() {
+                cores = core;
+            }
+
             let this = pool.clone();
             builder
-                .spawn(move || this.run_thread())
+                .spawn(move || {
+                    if cores.len() > 0 {
+                        bind_core(cores[id]);
+                    }
+                    this.run_thread()
+                })
                 .expect("failed to spawn worker thread");
         }
 
@@ -153,6 +221,7 @@ impl Pool {
 pub struct ThreadConfig {
     prefix: Option<String>,
     stack_size: Option<usize>,
+    cores:Option<Arc<Vec<usize>>>,
 }
 
 impl Default for ThreadConfig {
@@ -168,6 +237,7 @@ impl ThreadConfig {
         Self {
             prefix: None,
             stack_size: None,
+            cores: None,
         }
     }
 
@@ -187,6 +257,12 @@ impl ThreadConfig {
     /// Set that size of the stack of each spawned thread.
     pub fn stack_size(mut self, stack_size: usize) -> Self {
         self.stack_size = Some(stack_size);
+        self
+    }
+
+    /// Set that size of the stack of each spawned thread.
+    pub fn cores(mut self, cores:Vec<usize>) -> Self {
+        self.cores = Some(Arc::new(cores));
         self
     }
 }
@@ -438,7 +514,10 @@ mod tests {
 
     #[test]
     fn with_thread_config() {
-        let config = ThreadConfig::new().prefix("pool");
+        let mut vec = Vec::new();
+        vec.insert(0, 0);
+        let config = ThreadConfig::new().prefix("pool").cores(vec);
+
 
         let pool = Pool::with_config(1, config);
 
