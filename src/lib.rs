@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn scope_zoom() {
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
         let mut outer = 0;
 
         pool.scoped(|scope| {
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn scope_recurse() {
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
         let mut buf = [0, 1, 0, 0];
 
         pool.scoped(|next| {
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn spawn_doesnt_block() {
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
         pool.spawn(move || loop {
             sleep(Duration::from_millis(1000))
         });
@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn scope_forever_zoom() {
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
         let forever = Scope::forever(pool);
 
         let ran = AtomicBool::new(false);
@@ -389,49 +389,49 @@ mod tests {
 
     #[test]
     fn pool_shutdown() {
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
         pool.shutdown();
     }
 
     #[test]
     #[should_panic]
     fn task_panic() {
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
         pool.scoped(|_| panic!());
     }
 
     #[test]
     #[should_panic]
     fn scoped_execute_panic() {
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
         pool.scoped(|scope| scope.execute(|| panic!()));
     }
 
     #[test]
     #[should_panic]
     fn pool_panic() {
-        let _pool = Pool::new(num_cpus::get());
+        let _pool = Pool::new(3,Vec::from([0,1,2]));
         panic!();
     }
 
     #[test]
     #[should_panic]
     fn zoomed_scoped_execute_panic() {
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
         pool.scoped(|scope| scope.zoom(|scope2| scope2.execute(|| panic!())));
     }
 
     #[test]
     #[should_panic]
     fn recurse_scheduler_panic() {
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
         pool.scoped(|scope| scope.recurse(|_| panic!()));
     }
 
     #[test]
     #[should_panic]
     fn recurse_execute_panic() {
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
         pool.scoped(|scope| scope.recurse(|scope2| scope2.execute(|| panic!())));
     }
 
@@ -452,7 +452,7 @@ mod tests {
             expected: expected_drops,
         };
 
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
 
         pool.scoped(|scope| {
             for task in 0..tasks {
@@ -489,7 +489,7 @@ mod tests {
             expected: tasks,
         };
 
-        let pool = Pool::new(num_cpus::get());
+        let pool = Pool::new(3,Vec::from([0,1,2]));
 
         pool.scoped(|scope| {
             for _ in 0..tasks {
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn no_thread_config() {
-        let pool = Pool::new(1);
+        let pool = Pool::new(1,Vec::from([0]));
 
         pool.scoped(|scope| {
             scope.execute(|| {
